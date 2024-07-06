@@ -30,10 +30,15 @@ const cache = new LRUCache({
 });
 export async function MusicService() {
   return {
-    getMusic: async ({ site, page: pg, limit: lm }: TgetMusic) => {
-      const { page, limit, offset } = paginate({ page: pg, limit: lm });
+    getMusic: async ({ site, ...tGet }: TgetMusic) => {
+      const { page, limit, offset } = paginate({
+        page: +(tGet?.page || "1"),
+        limit: +(tGet?.limit || "10"),
+      });
       let data = cache.get(`musics_musicsDoc_${site}_${page}`);
       if (!data) {
+        console.log(`musics_musicsDoc_${site}_${page}`, data);
+
         const filter = { "sites.url": site };
         const musicsDoc = await Music.find(
           filter,
@@ -55,12 +60,14 @@ export async function MusicService() {
             count: total,
           },
         };
-        cache.set(`musics_musicsDoc_${site}`, data);
       }
       return data;
     },
 
     musicDetails: async ({ slug, site, ip, userAgent }: TMusicDetails) => {
+      const dataExist = cache.get(`musics_musicsDoc_${site}_${slug}`);
+      if (dataExist) return dataExist;
+
       let music = await Music.findOne({
         "sites.slug": slug,
         "sites.url": site,
@@ -69,11 +76,14 @@ export async function MusicService() {
       if (!music) return error(401, { message: "Musik not found" });
       updateViews(music, ip, userAgent);
       const musicClear = musicClearBySite(music, site);
-      return {
+
+      const data = {
         data: musicClear,
         related: await related(slug, site, music),
         latest: await latest(site, music),
       };
+      cache.set(`musics_musicsDoc_${site}_${slug}`, data);
+      return data;
     },
   };
 }

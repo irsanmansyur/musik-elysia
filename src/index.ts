@@ -8,11 +8,6 @@ const app = new Elysia()
     MyError,
   })
   .onError(({ error, headers }) => {
-    if (error instanceof MyError) {
-      error(error.message, error.code);
-
-      //   headers .set("x-error-code", error.code.toString());
-    }
     return error;
   });
 app.use(musicModule);
