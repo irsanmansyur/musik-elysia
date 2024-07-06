@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  musik_elysia:
+    image: musik_elysia
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    privileged: true
+    restart: unless-stopped
+    container_name: musik_elysia
+
+networks:
+  default:
+    external: true
+    name: scoobydoo
