@@ -1,36 +1,172 @@
 import { LRUCache } from "lru-cache";
 import mongodb from "../database/mongoose";
-import musicSchema, { ISite } from "./music.schema";
+import musicSchema, { EStatus, IMusic, ISite } from "./music.schema";
+import { paginate, TPaginate } from "../commons/helpers/paginate";
+import { TMusicDetails } from "./type";
+import { error } from "elysia";
+import { Document } from "mongoose";
+import musicSearchSchema, { IMusicSearch } from "./schemas/music-search.schema";
 
-let mymongo: typeof import("mongoose") | null = null;
+const mymongo: typeof import("mongoose") | null = await mongodb();
+const Music = mymongo.model<IMusic>("musics", musicSchema);
+type TMusic = Document<unknown, {}, IMusic> &
+  IMusic &
+  Required<{
+    _id: unknown;
+  }>;
+
+const MusicSearch = mymongo.model<IMusicSearch>(
+  "musicsSearch",
+  musicSearchSchema
+);
+type TMusicSearch = Document<unknown, {}, IMusic> & IMusicSearch;
+
+type TgetMusic = TPaginate & {
+  site: string;
+};
+const cache = new LRUCache({
+  ttl: 1000 * 60,
+  ttlAutopurge: true,
+});
 export async function MusicService() {
-  if (!mymongo) mymongo = await mongodb();
-  const cache = new LRUCache({
-    ttl: 1000 * 60,
-    ttlAutopurge: true,
-  });
-
-  const Music = mymongo.model("musics", musicSchema);
   return {
-    getMusic: async (site?: string) => {
-      let musics = cache.get(`musics_musicsDoc_${site}`);
-      if (!musics) {
+    getMusic: async ({ site, page: pg, limit: lm }: TgetMusic) => {
+      const { page, limit, offset } = paginate({ page: pg, limit: lm });
+      let data = cache.get(`musics_musicsDoc_${site}_${page}`);
+      if (!data) {
+        const filter = { "sites.url": site };
         const musicsDoc = await Music.find(
-          { "sites.url": site },
+          filter,
           { thumbnail: 0, _id: 0 },
-          { limit: 10, sort: { createdAt: -1 } }
+          { limit: 10, skip: offset, sort: { createdAt: -1 } }
         ).exec();
         let siteNew: ISite;
-        musics = musicsDoc.map((msc) => {
-          const { sites, ...music } = msc.toJSON();
-          if (!siteNew) siteNew = sites.find((s) => s.url === site) as ISite;
-          music["slug"] = siteNew.slug;
-          music["status"] = siteNew.status;
-          return music;
+
+        const musics = musicsDoc.map((msc) => {
+          return musicClearBySite(msc, site);
         });
-        cache.set(`musics_musicsDoc_${site}`, musics);
+        const total = await Music.countDocuments(filter).exec();
+        data = {
+          data: musics,
+          meta: {
+            totalPages: Math.ceil(total / limit),
+            page,
+            limit,
+            count: total,
+          },
+        };
+        cache.set(`musics_musicsDoc_${site}`, data);
       }
-      return musics;
+      return data;
+    },
+
+    musicDetails: async ({ slug, site, ip, userAgent }: TMusicDetails) => {
+      let music = await Music.findOne({
+        "sites.slug": slug,
+        "sites.url": site,
+        "sites.status": EStatus.active,
+      }).exec();
+      if (!music) return error(401, { message: "Musik not found" });
+      updateViews(music, ip, userAgent);
+      const musicClear = musicClearBySite(music, site);
+      return {
+        data: musicClear,
+        related: await related(slug, site, music),
+        latest: await latest(site, music),
+      };
     },
   };
+}
+
+const related = async (slug: string, site: string, music: TMusic) => {
+  const musics = await Music.find(
+    {
+      "sites.slug": slug,
+      "sites.url": site,
+      "sites.status": EStatus.active,
+      musicId: { $ne: music.musicId },
+    },
+    { thumbnail: 0, _id: 0, views: 0 },
+    {
+      limit: 20,
+      sort: { title: -1 },
+    }
+  ).exec();
+  return musics.map((msc) => musicClearBySite(msc, site));
+};
+function musicClearBySite(msc: TMusic, url: string) {
+  const { sites, ...music } = msc.toJSON();
+  const site = sites.find((s) => s.url === url) as ISite;
+  music["slug"] = site.slug;
+  music["status"] = site.status;
+  return music;
+}
+async function latest(url: string, music?: TMusic) {
+  const musics = await Music.find(
+    {
+      "sites.url": url,
+      "sites.status": EStatus.active,
+      ...(music && {
+        musicId: { $ne: music.musicId },
+      }),
+    },
+    {
+      views: 0,
+      _id: 0,
+    }
+  )
+    .sort({ createdAt: -1 })
+    .exec();
+  return musics.map((msc) => musicClearBySite(msc, url));
+}
+
+function updateViews(
+  music: TMusic,
+  ip: string,
+  userAgent: string,
+  from?: string
+) {
+  const viewed = music.views.find(
+    (v) =>
+      v.ip === ip &&
+      v.userAgent === userAgent &&
+      new Date(v.date).getMilliseconds() >
+        new Date().getMilliseconds() - 1000 * 60 * 60
+  );
+  if (from) createMusikSearchLatest(music, userAgent, ip);
+  if (viewed) return;
+
+  const views = [...music.views, { ip, userAgent, date: new Date() }];
+  Music.updateOne({ musicId: music.musicId }, { views }).exec();
+}
+
+async function createMusikSearchLatest(
+  musik: TMusic,
+  userAgent: string,
+  ip: string
+) {
+  /** cek dulu sudah ada sejam terakhir dengan id dan userAgent yang sama */
+  const musikSearch = await MusicSearch.findOne({
+    musicId: musik.musicId,
+    userAgent,
+    ip,
+    createdAt: { $gte: new Date(Date.now() - 1000 * 60 * 60 * 1) },
+  }).exec();
+  if (musikSearch) return;
+
+  MusicSearch.create({
+    userAgent,
+    ip,
+    createdAt: new Date(),
+    search: musik.title + " " + musik.artists.join(" ") + " " + musik.album,
+    other: musik.other,
+    title: musik.title,
+    artists: musik.artists,
+    slug: musik.slug,
+    album: musik.album,
+    musicId: musik.musicId,
+    thumbnail: musik.thumbnail,
+    duration: musik.duration,
+    genres: musik.genres,
+  });
 }

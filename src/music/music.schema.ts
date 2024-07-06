@@ -1,4 +1,20 @@
-import { Document, Schema, model } from "mongoose";
+import { Document, Schema } from "mongoose";
+
+export enum EStatus {
+  active = "active",
+  inactive = "inactive",
+  pending = "pending",
+  deleted = "deleted",
+}
+export interface IOther {
+  jenis: "youtube" | "spotify" | "lokal";
+  url: string;
+}
+export interface ISite {
+  url: string;
+  slug: string;
+  status: EStatus;
+}
 
 export interface IMusic extends Document {
   slug: string;
@@ -11,23 +27,13 @@ export interface IMusic extends Document {
   other: IOther;
   genres: string[];
   search: string;
-  status: IStatus;
+  status: EStatus;
   sites: ISite[];
   year: string;
   fileSize: string;
+  views: { ip: string; date: Date; userAgent: string }[];
   updatedAt: Date;
   createdAt: Date;
-}
-
-export type IStatus = "active" | "inactive" | "pending" | "deleted";
-export interface IOther {
-  jenis: "youtube" | "spotify" | "lokal";
-  url: string;
-}
-export interface ISite {
-  url: string;
-  slug: string;
-  status: IStatus;
 }
 
 const musicSchema = new Schema<IMusic>({
@@ -53,7 +59,9 @@ const musicSchema = new Schema<IMusic>({
   year: { type: String, required: true },
   fileSize: { type: String, required: true },
   status: { type: String },
+  views: { type: [{ ip: String, date: Date, userAgent: String }], default: [] },
   updatedAt: { type: Date, required: true },
   createdAt: { type: Date, required: true },
 });
+
 export default musicSchema;
