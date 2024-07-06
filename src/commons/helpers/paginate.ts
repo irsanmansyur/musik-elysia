@@ -11,6 +11,6 @@ export const paginate = ({
 
 export class TPaginate {
   search?: string;
-  limit?: number;
-  page?: number;
+  limit?: string;
+  page?: string;
 }

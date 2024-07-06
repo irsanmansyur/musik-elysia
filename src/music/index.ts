@@ -12,8 +12,8 @@ const musicModule = new Elysia()
       {
         query: t.Object({
           site: t.String(),
-          page: t.Number(),
-          limit: t.Number(),
+          page: t.Optional(t.String()),
+          limit: t.Optional(t.String()),
         }),
       }
     );
