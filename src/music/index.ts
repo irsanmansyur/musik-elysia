@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import { MusicService } from "./music.service";
+import { BunCache } from "bun-cache";
 
 const musicModule = new Elysia()
   .state({ musicService: await MusicService() })
