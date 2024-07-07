@@ -38,7 +38,6 @@ export async function MusicService() {
       let data = cache.get(`musics_musicsDoc_${site}_${page}`);
       if (!data) {
         console.log(`musics_musicsDoc_${site}_${page}`, data);
-
         const filter = { "sites.url": site };
         const musicsDoc = await Music.find(
           filter,
@@ -60,6 +59,7 @@ export async function MusicService() {
             count: total,
           },
         };
+        cache.set(`musics_musicsDoc_${site}_${page}`, data);
       }
       return data;
     },
